@@ -1,0 +1,40 @@
+{
+  "name": "@condero/audio-player",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Vue 3 audio player with waveform, repeat, speed control and A/B looping",
+  "license": "MIT",
+  "main": "dist/audio-player.js",
+  "module": "dist/audio-player.js",
+  "exports": {
+    ".": {
+      "import": "./dist/audio-player.js"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "peerDependencies": {
+    "vue": "^3.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2",
+    "vite": "^6.3",
+    "vue": "^3.5"
+  },
+  "keywords": [
+    "vue",
+    "vue3",
+    "audio",
+    "player",
+    "waveform",
+    "loop",
+    "ab-loop"
+  ]
+}
