@@ -6,7 +6,7 @@ const props = defineProps({
   src: { type: String, required: true },
 })
 
-const speeds = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
+const speeds = [1.2, 1.1, 1.05, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
 
 const {
   isLoading,

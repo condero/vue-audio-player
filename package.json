@@ -1,6 +1,6 @@
 {
   "name": "@condero/vue-audio-player",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "description": "Vue 3 audio player with waveform, repeat, speed control and A/B looping",
   "license": "MIT",
