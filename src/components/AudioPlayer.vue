@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted } from 'vue'
 import { useAudioPlayer } from '../composables/useAudioPlayer'
+import { version } from '../../package.json'
 
 const props = defineProps({
   src: { type: String, required: true },
@@ -218,6 +219,7 @@ onMounted(drawWaveform)
         <input type="range" min="0" max="1" step="0.01" :value="volume" @input="setVolume(parseFloat($event.target.value))" class="volume-slider" />
       </div>
     </div>
+    <span class="version" :title="'v' + version">v{{ version }}</span>
   </div>
 </template>
 
@@ -482,5 +484,18 @@ onMounted(drawWaveform)
   background: var(--ap-thumb);
   cursor: pointer;
   border: none;
+}
+.version {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 10px;
+  color: var(--ap-muted, #adb5bd);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+.player:hover .version {
+  opacity: 1;
 }
 </style>
