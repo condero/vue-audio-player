@@ -4,6 +4,12 @@
   "type": "module",
   "description": "Vue 3 audio player with waveform, repeat, speed control and A/B looping",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/condero/vue-audio-player.git"
+  },
+  "bugs": "https://github.com/condero/vue-audio-player/issues",
+  "homepage": "https://github.com/condero/vue-audio-player#readme",
   "main": "dist/audio-player.js",
   "module": "dist/audio-player.js",
   "exports": {
