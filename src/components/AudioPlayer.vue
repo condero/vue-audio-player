@@ -9,6 +9,7 @@ const props = defineProps({
 const speeds = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
 
 const {
+  isLoading,
   isPlaying,
   currentTime,
   duration,
@@ -144,11 +145,12 @@ onMounted(drawWaveform)
     <div
       ref="progressRef"
       class="waveform-bar"
-      @mousedown="onProgressDown"
+      :class="{ disabled: isLoading }"
+      @mousedown="!isLoading && onProgressDown($event)"
       @mousemove="onProgressMove"
       @mouseup="onProgressUp"
       @mouseleave="onProgressUp"
-      @touchstart.prevent="onProgressDown"
+      @touchstart.prevent="!isLoading && onProgressDown($event)"
       @touchmove.prevent="onProgressMove"
       @touchend="onProgressUp"
     >
@@ -156,10 +158,13 @@ onMounted(drawWaveform)
       <div class="fallback-progress" v-if="!waveformPeaks">
         <div class="fallback-fill" :style="{ width: progressRatio * 100 + '%' }" />
       </div>
+      <div class="loading-overlay" v-if="isLoading">
+        <div class="spinner" />
+      </div>
     </div>
 
     <div class="row-controls">
-      <button class="btn-icon" :class="{ active: isRepeat }" @click="toggleRepeat" title="Repeat">
+      <button class="btn-icon" :class="{ active: isRepeat }" :disabled="isLoading" @click="toggleRepeat" title="Repeat">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="17 1 21 5 17 9" />
           <path d="M3 11V9a4 4 0 0 1 4-4h14" />
@@ -171,6 +176,7 @@ onMounted(drawWaveform)
       <button
         class="btn-icon"
         :class="{ active: loopA !== null }"
+        :disabled="isLoading"
         @click="setLoopA"
         :title="loopA !== null ? 'A: ' + formatTime(loopA) : 'Set A'"
       >A</button>
@@ -178,18 +184,19 @@ onMounted(drawWaveform)
       <button
         class="btn-icon"
         :class="{ active: loopB !== null }"
+        :disabled="isLoading"
         @click="setLoopB"
         :title="loopB !== null ? 'B: ' + formatTime(loopB) : 'Set B'"
       >B</button>
 
-      <button v-if="hasABLoop" class="btn-icon" @click="clearLoop" title="Clear loop">
+      <button v-if="hasABLoop" class="btn-icon" :disabled="isLoading" @click="clearLoop" title="Clear loop">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
 
-      <button class="btn-play" @click="togglePlay">
+      <button class="btn-play" :disabled="isLoading" @click="togglePlay">
         <svg v-if="!isPlaying" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
           <path d="M8 5v14l11-7z" />
         </svg>
@@ -198,7 +205,7 @@ onMounted(drawWaveform)
         </svg>
       </button>
 
-      <select class="speed-select" :value="playbackRate" @change="setPlaybackRate(parseFloat($event.target.value))">
+      <select class="speed-select" :disabled="isLoading" :value="playbackRate" @change="setPlaybackRate(parseFloat($event.target.value))">
         <option v-for="s in speeds" :key="s" :value="s">{{ s }}x</option>
       </select>
 
@@ -308,6 +315,32 @@ onMounted(drawWaveform)
   overflow: hidden;
 }
 
+.waveform-bar.disabled {
+  cursor: not-allowed;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ap-bg) 60%, transparent);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid var(--ap-border);
+  border-top-color: var(--ap-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .waveform-canvas {
   width: 100%;
   height: 100%;
@@ -352,7 +385,7 @@ onMounted(drawWaveform)
   flex-shrink: 0;
 }
 
-.btn-icon:hover {
+.btn-icon:hover:not(:disabled) {
   color: var(--ap-text);
   background: var(--ap-surface);
 }
@@ -360,6 +393,12 @@ onMounted(drawWaveform)
 .btn-icon.active {
   color: var(--ap-accent);
   border-color: var(--ap-accent);
+}
+
+.btn-icon:disabled,
+.btn-play:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .btn-play {
@@ -377,7 +416,7 @@ onMounted(drawWaveform)
   flex-shrink: 0;
 }
 
-.btn-play:hover {
+.btn-play:hover:not(:disabled) {
   background: var(--ap-accent-hover);
 }
 
@@ -401,6 +440,11 @@ onMounted(drawWaveform)
 .speed-select:focus {
   outline: none;
   border-color: var(--ap-accent);
+}
+
+.speed-select:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .volume-group {

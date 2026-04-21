@@ -17,6 +17,6 @@ watch(dark, (v) => {
     >
       {{ dark ? '☀ Light Mode' : '● Dark Mode' }}
     </button>
-    <AudioPlayer src="/test.mp3" />
+    <AudioPlayer src="/Abendsterne - The Colours Of Your Life.mp3" />
   </div>
 </template>

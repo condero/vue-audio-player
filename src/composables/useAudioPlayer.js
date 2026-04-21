@@ -4,6 +4,7 @@ export function useAudioPlayer() {
   const audio = new Audio()
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
 
+  const isLoading = ref(true)
   const isPlaying = ref(false)
   const currentTime = ref(0)
   const duration = ref(0)
@@ -16,6 +17,9 @@ export function useAudioPlayer() {
   const waveformPeaks = ref(null)
 
   let rafId = null
+  let audioReady = false
+  let waveformReady = false
+  let loadStart = 0
 
   function startRafLoop() {
     stopRafLoop()
@@ -46,6 +50,23 @@ export function useAudioPlayer() {
   audio.addEventListener('loadedmetadata', () => {
     duration.value = audio.duration
   })
+
+  audio.addEventListener('canplay', () => {
+    audioReady = true
+    checkReady()
+  })
+
+  audio.addEventListener('waiting', () => {
+    isLoading.value = true
+  })
+
+  function checkReady() {
+    if (audioReady && waveformReady) {
+      const elapsed = Date.now() - loadStart
+      const remaining = Math.max(0, 300 - elapsed)
+      setTimeout(() => { isLoading.value = false }, remaining)
+    }
+  }
 
   audio.addEventListener('timeupdate', () => {
     if (!isPlaying.value) {
@@ -107,9 +128,11 @@ export function useAudioPlayer() {
         peaks[i] = max
       }
       waveformPeaks.value = peaks
-    } catch (e) {
+    } catch {
       waveformPeaks.value = null
     }
+    waveformReady = true
+    checkReady()
   }
 
   function load(src) {
@@ -118,6 +141,10 @@ export function useAudioPlayer() {
     audio.src = src
     audio.load()
     isPlaying.value = false
+    isLoading.value = true
+    audioReady = false
+    waveformReady = false
+    loadStart = Date.now()
     currentTime.value = 0
     duration.value = 0
     buffered.value = 0
@@ -192,6 +219,7 @@ export function useAudioPlayer() {
   })
 
   return {
+    isLoading: readonly(isLoading),
     isPlaying: readonly(isPlaying),
     currentTime: readonly(currentTime),
     duration: readonly(duration),

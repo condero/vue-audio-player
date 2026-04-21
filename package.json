@@ -1,5 +1,5 @@
 {
-  "name": "@condero/audio-player",
+  "name": "@condero/vue-audio-player",
   "version": "1.0.0",
   "type": "module",
   "description": "Vue 3 audio player with waveform, repeat, speed control and A/B looping",
@@ -10,7 +10,7 @@
     ".": {
       "import": "./dist/audio-player.js"
     },
-    "./style.css": "./dist/style.css"
+    "./style.css": "./dist/audio-player.css"
   },
   "files": [
     "dist"
