@@ -1,15 +1,15 @@
 # @condero/vue-audio-player
 
-Vue 3 Audio Player mit Waveform-Darstellung, Repeat, Geschwindigkeitskontrolle und A/B-Looping.
+Vue 3 audio player with waveform visualization, repeat, speed control and A/B looping.
 
 ## Features
 
-- Waveform-Visualisierung per Web Audio API (keine externen Dependencies)
-- Repeat — ganzen Song in Schleife abspielen
-- Geschwindigkeit — verlangsamt abspielen in 10%-Schritten (1.0x bis 0.5x)
-- A/B Loop — zwei Positionen markieren und als Schleife abspielen
-- Dark/Light Mode — unterstützt Bootstrap 5.3 Theme-Variablen und `prefers-color-scheme`
-- Responsive — Desktop und Mobil (Touch-freundlich)
+- Waveform visualization via Web Audio API (no external dependencies)
+- Repeat — loop the entire track
+- Speed — slow down playback in 10% steps (1.0x down to 0.5x)
+- A/B Loop — mark two positions within a track and loop that section
+- Dark/Light Mode — supports Bootstrap 5.3 theme variables and `prefers-color-scheme`
+- Responsive — desktop and mobile (touch-friendly)
 
 ## Installation
 
@@ -17,7 +17,7 @@ Vue 3 Audio Player mit Waveform-Darstellung, Repeat, Geschwindigkeitskontrolle u
 npm install @condero/vue-audio-player
 ```
 
-## Nutzung
+## Usage
 
 ```vue
 <script setup>
@@ -26,28 +26,28 @@ import '@condero/vue-audio-player/style.css'
 </script>
 
 <template>
-  <AudioPlayer src="/pfad/zur/datei.mp3" />
+  <AudioPlayer src="/path/to/file.mp3" />
 </template>
 ```
 
 ## Props
 
-| Prop | Typ | Pflicht | Beschreibung |
-|------|-----|---------|-------------|
-| `src` | String | ja | URL zur Audiodatei |
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| `src` | String | yes | URL to the audio file |
 
-## Entwicklung
+## Development
 
 ```bash
 npm install
-npm run dev      # Demo mit Theme-Toggle unter localhost:5173
-npm run build    # Library bauen (dist/)
+npm run dev      # Demo with theme toggle at localhost:5173
+npm run build    # Build library (dist/)
 ```
 
-## Einbindung ohne npm-Veröffentlichung
+## Local usage without publishing
 
 ```bash
-npm install ../pfad/zum/vue-audio-player
+npm install ../path/to/vue-audio-player
 ```
 
-Nach Änderungen am Player: `npm run build` im Player-Projekt, dann im Zielprojekt erneut `npm install` ausführen.
+After making changes: run `npm run build` in the player project, then reinstall in the target project.
