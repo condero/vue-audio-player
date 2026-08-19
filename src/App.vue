@@ -3,10 +3,17 @@ import { ref, watch } from 'vue'
 import AudioPlayer from './components/AudioPlayer.vue'
 
 const dark = ref(true)
-
 watch(dark, (v) => {
   document.documentElement.setAttribute('data-bs-theme', v ? 'dark' : 'light')
 }, { immediate: true })
+
+const track = '/Abendsterne - The Colours Of Your Life.mp3'
+
+// Pretend these were precomputed by a backend (values 0..1): rendered as-is,
+// the player never fetches the file for a waveform.
+const demoPeaks = Array.from({ length: 120 }, (_, i) =>
+  0.3 + 0.6 * Math.abs(Math.sin(i / 9) * Math.cos(i / 3.5)),
+)
 </script>
 
 <template>
@@ -17,6 +24,20 @@ watch(dark, (v) => {
     >
       {{ dark ? '☀ Light Mode' : '● Dark Mode' }}
     </button>
-    <AudioPlayer src="/Abendsterne - The Colours Of Your Life.mp3" />
+
+    <label style="font-size:13px;color:#888">
+      default — streams via the audio element, slim progress bar, nothing fetched for a waveform
+    </label>
+    <AudioPlayer :src="track" />
+
+    <label style="font-size:13px;color:#888">
+      autoplay + precomputed peaks — still no waveform fetch
+    </label>
+    <AudioPlayer :src="track" autoplay :peaks="demoPeaks" />
+
+    <label style="font-size:13px;color:#888">
+      waveform — opts into the client-side full-file decode (non-blocking)
+    </label>
+    <AudioPlayer :src="track" waveform />
   </div>
 </template>

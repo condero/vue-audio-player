@@ -5,12 +5,22 @@ import { version } from '../../package.json'
 
 const props = defineProps({
   src: { type: String, required: true },
+  // Start playback as soon as the initial load finishes. Policy rejections
+  // are swallowed — the play button stays available for a manual tap.
+  autoplay: { type: Boolean, default: false },
+  // Opt into the client-side waveform: downloads the whole file in the
+  // background and decodes it. Never blocks playback.
+  waveform: { type: Boolean, default: false },
+  // Precomputed peaks (numbers 0..1) — rendered as-is, nothing is fetched.
+  peaks: { type: Array, default: null },
 })
 
 const speeds = [1.2, 1.1, 1.05, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
 
 const {
   isLoading,
+  isBuffering,
+  isSeeking,
   isPlaying,
   currentTime,
   duration,
@@ -21,6 +31,7 @@ const {
   loopB,
   waveformPeaks,
   load,
+  play,
   togglePlay,
   seekByRatio,
   setPlaybackRate,
@@ -29,6 +40,8 @@ const {
   setLoopA,
   setLoopB,
   clearLoop,
+  setPeaks,
+  generateWaveform,
 } = useAudioPlayer()
 
 const waveformCanvas = ref(null)
@@ -41,8 +54,45 @@ const progressRatio = computed(() => (duration.value ? currentTime.value / durat
 const loopARatio = computed(() => (loopA.value != null && duration.value ? loopA.value / duration.value : null))
 const loopBRatio = computed(() => (loopB.value != null && duration.value ? loopB.value / duration.value : null))
 const hasABLoop = computed(() => loopA.value !== null && loopB.value !== null)
+// Non-blocking spinner while playback stalls or a seek is in flight — the
+// controls stay usable in both states.
+const showBusyIndicator = computed(() => isBuffering.value || isSeeking.value)
 
-load(props.src)
+// Source changes intentionally reset the player; position changes only ever
+// touch the existing element's currentTime.
+load(props.src, { waveform: props.waveform })
+
+let autoplayDone = false
+function tryAutoplay() {
+  if (!props.autoplay || autoplayDone || isLoading.value) return
+  autoplayDone = true
+  play()
+}
+
+watch(isLoading, (loading) => {
+  if (!loading) tryAutoplay()
+})
+tryAutoplay()
+
+watch(
+  () => props.src,
+  (src) => {
+    autoplayDone = false
+    load(src, { waveform: props.waveform })
+  },
+)
+
+watch(
+  () => props.peaks,
+  (p) => {
+    setPeaks(p)
+  },
+  { immediate: true },
+)
+
+watch(() => props.waveform, (on) => {
+  if (on && !waveformPeaks.value) generateWaveform()
+})
 
 function formatTime(seconds) {
   if (!seconds || !isFinite(seconds)) return '0:00'
@@ -86,6 +136,7 @@ function drawWaveform() {
   canvas.width = rect.width * dpr
   canvas.height = rect.height * dpr
   const ctx = canvas.getContext('2d')
+  if (!ctx) return
   ctx.scale(dpr, dpr)
 
   const w = rect.width
@@ -160,6 +211,9 @@ onMounted(drawWaveform)
         <div class="fallback-fill" :style="{ width: progressRatio * 100 + '%' }" />
       </div>
       <div class="loading-overlay" v-if="isLoading">
+        <div class="spinner" />
+      </div>
+      <div class="state-indicator" v-else-if="showBusyIndicator" :title="isSeeking && !isBuffering ? 'Seeking' : 'Buffering'">
         <div class="spinner" />
       </div>
     </div>
@@ -341,6 +395,22 @@ onMounted(drawWaveform)
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.state-indicator {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+}
+
+.state-indicator .spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
 }
 
 .waveform-canvas {
