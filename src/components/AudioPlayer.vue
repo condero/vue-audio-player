@@ -15,6 +15,10 @@ const props = defineProps({
   peaks: { type: Array, default: null },
 })
 
+// Queue-consumer surface: a host swaps `src` per track and reacts to
+// end-of-track and load failures instead of reaching into the native element.
+const emit = defineEmits(['ended', 'error', 'playing', 'paused', 'ready'])
+
 const speeds = [1.2, 1.1, 1.05, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
 
 const {
@@ -32,6 +36,7 @@ const {
   waveformPeaks,
   load,
   play,
+  pause,
   togglePlay,
   seekByRatio,
   setPlaybackRate,
@@ -42,7 +47,17 @@ const {
   clearLoop,
   setPeaks,
   generateWaveform,
-} = useAudioPlayer()
+} = useAudioPlayer({
+  onEnded: () => emit('ended'),
+  onError: (mediaError) => emit('error', mediaError),
+  onPlaying: () => emit('playing'),
+  onPaused: () => emit('paused'),
+  onReady: () => emit('ready'),
+})
+
+// Programmatic control for hosts: play() returns the element's own promise, so
+// an autoplay-policy rejection (NotAllowedError) reaches the caller.
+defineExpose({ play, pause })
 
 const waveformCanvas = ref(null)
 const progressRef = ref(null)
@@ -77,7 +92,10 @@ tryAutoplay()
 watch(
   () => props.src,
   (src) => {
-    autoplayDone = false
+    // A swap loads the new source paused at 0:00 on the same element and never
+    // autoplays — the consumer sequences play() after `ready`. Volume, rate
+    // and repeat carry over (load() only resets position state).
+    autoplayDone = true
     load(src, { waveform: props.waveform })
   },
 )

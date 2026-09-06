@@ -11,6 +11,7 @@ Vue 3 audio player with optional waveform visualization, repeat, speed control a
 - A/B Loop — mark two positions within a track and loop that section
 - Dark/Light Mode — supports Bootstrap 5.3 theme variables and `prefers-color-scheme`
 - Responsive — desktop and mobile (touch-friendly)
+- Queue-friendly — events and exposed `play()`/`pause()` for playlist-driven hosts
 
 ## Installation
 
@@ -39,6 +40,45 @@ import '@condero/vue-audio-player/style.css'
 | `autoplay` | Boolean | no | Starts playback after the initial audio load. Browser autoplay policy may require a manual tap. |
 | `waveform` | Boolean | no | Defaults to `false`. When enabled, fetches and decodes the complete file in the background to generate a waveform. |
 | `peaks` | Array | no | Precomputed waveform values from `0` to `1`. Providing peaks avoids the waveform fetch. |
+
+## Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `ready` | — | The current source can play: the first `canplay` after each (re)load. Sequence `play()` here when swapping `src` programmatically (mobile Safari requires it). A stall recovery does not re-fire it. |
+| `ended` | — | The current source finished naturally. Not emitted in repeat mode — the track loops silently. |
+| `error` | `MediaError` | The audio element failed. Carries the native `MediaError` (code 4 = unsupported/forbidden source, 2 = network failure) or the raw error event when the element reports none — useful for detecting expired signed URLs. |
+| `playing` | — | Playback started — mirror of the element's `play` event, whether from the play button or a programmatic `play()`. |
+| `paused` | — | Playback paused — mirror of the element's `pause` event. |
+
+## Exposed methods
+
+```vue
+<script setup>
+import { ref } from 'vue'
+
+const player = ref(null)
+</script>
+
+<template>
+  <AudioPlayer
+    ref="player"
+    :src="currentSrc"
+    @ended="advanceToNextTrack"
+    @error="refetchSignedUrl"
+    @ready="player.play()"
+  />
+</template>
+```
+
+- `play()` — starts playback and returns the audio element's `play()` promise unchanged, so an autoplay-policy rejection (`NotAllowedError`) reaches the caller.
+- `pause()` — pauses playback.
+
+The raw audio element is intentionally not exposed; position, volume and rate stay owned by the component.
+
+## Swapping sources
+
+Changing the `src` prop loads the new source paused at `0:00` on the same audio element: position, buffered range, duration and A/B loop points reset, while volume, playback rate and repeat survive. `autoplay` applies to the initial load only — after a swap, wait for `ready` and call the exposed `play()`.
 
 ## Player states
 

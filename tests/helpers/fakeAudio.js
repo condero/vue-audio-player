@@ -27,18 +27,26 @@ export function createFakeAudioElement() {
     seeking: false,
     paused: true,
     ended: false,
+    error: null, // MediaError slot, set via __error() like a real element
     buffered: new FakeTimeRanges(),
     currentTimeSets: [], // every currentTime assignment, for seek assertions
+    // Like real elements: play/pause only fire their events on a state change.
     play: vi.fn(() => {
+      const wasPaused = el.paused
       el.paused = false
-      emit('play')
+      if (wasPaused) emit('play')
       return Promise.resolve()
     }),
     pause: vi.fn(() => {
-      el.paused = true
-      emit('pause')
+      if (!el.paused) {
+        el.paused = true
+        emit('pause')
+      }
     }),
-    load: vi.fn(() => emit('emptied')),
+    load: vi.fn(() => {
+      el.error = null // a fresh load clears the previous failure
+      emit('emptied')
+    }),
     addEventListener: (type, fn) => {
       ;(listeners[type] ||= []).push(fn)
     },
@@ -74,9 +82,17 @@ export function createFakeAudioElement() {
     },
     __ended: () => {
       el.ended = true
+      // Reaching the end pauses the element first (pause, then ended).
+      const wasPlaying = !el.paused
+      el.paused = true
+      if (wasPlaying) emit('pause')
       emit('ended')
     },
-    __error: () => emit('error'),
+    // Mirrors a real failure: the element reports the MediaError, then fires.
+    __error: (mediaError) => {
+      if (mediaError) el.error = mediaError
+      emit('error')
+    },
   }
   Object.defineProperty(el, 'currentTime', {
     get: () => currentTime,

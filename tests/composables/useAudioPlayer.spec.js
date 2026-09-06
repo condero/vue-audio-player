@@ -188,14 +188,19 @@ describe('useAudioPlayer — guards and regressions', () => {
     expect(element.currentTimeSets).toEqual([])
   })
 
-  it('surfaces load errors without leaving the player stuck in loading', () => {
+  it('surfaces the MediaError without leaving the player stuck in loading', () => {
     const [player] = setupPlayer()
     player.load('/dead.mp3')
-    element.__error()
+    const mediaError = { code: 4, message: 'MEDIA_ERR_SRC_NOT_SUPPORTED' }
+    element.__error(mediaError)
 
-    expect(player.error.value).toBeInstanceOf(Error)
+    expect(player.error.value).toStrictEqual(mediaError) // ref wraps objects in a reactive proxy
     expect(player.isLoading.value).toBe(false)
     expect(player.isBuffering.value).toBe(false)
+
+    player.load('/b.mp3')
+    element.__error() // no element-level MediaError: the raw event is surfaced
+    expect(player.error.value).toMatchObject({ type: 'error', target: element })
   })
 
   it('ended without repeat stops at zero; with repeat it replays', () => {
@@ -220,5 +225,64 @@ describe('useAudioPlayer — guards and regressions', () => {
     player.load('/audio.mp3')
     element.__progress(42.5)
     expect(player.buffered.value).toBe(42.5)
+  })
+})
+
+describe('useAudioPlayer — consumer hooks', () => {
+  it('fires onReady once per load, not on stall-recovery canplays', () => {
+    const onReady = vi.fn()
+    const [player] = withSetup(() => useAudioPlayer({ onReady }))
+    player.load('/audio.mp3')
+
+    element.__canPlay()
+    element.__canPlay() // buffering recovered — not a new source
+    expect(onReady).toHaveBeenCalledTimes(1)
+
+    player.load('/b.mp3')
+    element.__canPlay()
+    expect(onReady).toHaveBeenCalledTimes(2)
+  })
+
+  it('forwards the native play/pause events as onPlaying/onPaused', () => {
+    const onPlaying = vi.fn()
+    const onPaused = vi.fn()
+    const [player] = withSetup(() => useAudioPlayer({ onPlaying, onPaused }))
+    player.load('/audio.mp3')
+    element.__canPlay()
+
+    expect(onPaused).not.toHaveBeenCalled() // loading pauses an already-paused element
+
+    element.play()
+    expect(onPlaying).toHaveBeenCalledTimes(1)
+
+    element.pause()
+    expect(onPaused).toHaveBeenCalledTimes(1)
+  })
+
+  it('fires onEnded on natural end only; repeat mode replays silently', () => {
+    const onEnded = vi.fn()
+    const [player] = withSetup(() => useAudioPlayer({ onEnded }))
+    player.load('/audio.mp3')
+    element.__setMetadata(100)
+    element.__canPlay()
+
+    element.play()
+    element.__ended()
+    expect(onEnded).toHaveBeenCalledTimes(1)
+
+    player.toggleRepeat()
+    element.__ended()
+    expect(onEnded).toHaveBeenCalledTimes(1) // nothing leaves the player
+    expect(element.currentTimeSets).toEqual([0]) // ...but the track restarted
+  })
+
+  it('hands the MediaError to onError, falling back to the raw event', () => {
+    const onError = vi.fn()
+    const [player] = withSetup(() => useAudioPlayer({ onError }))
+    player.load('/dead.mp3')
+
+    const mediaError = { code: 4, message: 'MEDIA_ERR_SRC_NOT_SUPPORTED' }
+    element.__error(mediaError)
+    expect(onError).toHaveBeenCalledWith(mediaError)
   })
 })

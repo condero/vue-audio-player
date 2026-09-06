@@ -1,6 +1,9 @@
 import { ref, readonly, onUnmounted, watch } from 'vue'
 
-export function useAudioPlayer() {
+// The on* hooks let a host component forward player events to its own
+// consumers (a queue advances on `ended`, recovers on `error`, and sequences
+// play() after `ready`) without ever touching the audio element itself.
+export function useAudioPlayer({ onEnded, onError, onPlaying, onPaused, onReady } = {}) {
   const audio = new Audio()
 
   // The AudioContext is only needed to decode waveforms — create it lazily so
@@ -70,8 +73,12 @@ export function useAudioPlayer() {
   })
 
   audio.addEventListener('canplay', () => {
+    // One `ready` per (re)load: a stall-recovery canplay is not a new source
+    // and must not re-trigger the consumer's play-after-ready sequencing.
+    const firstAfterLoad = isLoading.value
     isLoading.value = false
     isBuffering.value = false
+    if (firstAfterLoad) onReady?.()
   })
 
   audio.addEventListener('waiting', () => {
@@ -120,24 +127,31 @@ export function useAudioPlayer() {
       isPlaying.value = false
       stopRafLoop()
       currentTime.value = 0
+      onEnded?.() // repeat replays silently: no end event leaves the player
     }
   })
 
   audio.addEventListener('play', () => {
     isPlaying.value = true
     startRafLoop()
+    onPlaying?.()
   })
 
   audio.addEventListener('pause', () => {
     isPlaying.value = false
     isBuffering.value = false
     stopRafLoop()
+    onPaused?.()
   })
 
-  audio.addEventListener('error', () => {
-    error.value = new Error('Audio load error')
+  audio.addEventListener('error', (event) => {
+    // Forward the native MediaError so consumers can tell an expired or
+    // forbidden signed URL (code 4) or a network failure (code 2) apart;
+    // fall back to the raw event when the engine fires `error` without one.
+    error.value = audio.error ?? event
     isLoading.value = false
     isBuffering.value = false
+    onError?.(error.value)
   })
 
   watch(playbackRate, (rate) => {
