@@ -283,6 +283,126 @@ describe('useAudioPlayer — consumer hooks', () => {
 
     const mediaError = { code: 4, message: 'MEDIA_ERR_SRC_NOT_SUPPORTED' }
     element.__error(mediaError)
-    expect(onError).toHaveBeenCalledWith(mediaError)
+    expect(onError).toHaveBeenCalledWith(mediaError, '/dead.mp3')
+  })
+})
+
+describe('useAudioPlayer — onTime hook (2.2.0)', () => {
+  it('reports { currentTime, duration, progress, rate } on timeupdate', () => {
+    const onTime = vi.fn()
+    const [player] = withSetup(() => useAudioPlayer({ onTime }))
+    player.load('/audio.mp3')
+    element.__setMetadata(120)
+    element.__canPlay()
+
+    element.__tick(30)
+    expect(onTime).toHaveBeenLastCalledWith({ currentTime: 30, duration: 120, progress: 0.25, rate: 1 })
+
+    element.__tick(240) // past the end: the ratio clamps, never exceeds 1
+    expect(onTime).toHaveBeenLastCalledWith({ currentTime: 240, duration: 120, progress: 1, rate: 1 })
+  })
+
+  it('duration is null while metadata are pending and for rangeless streams', () => {
+    const onTime = vi.fn()
+    const [player] = withSetup(() => useAudioPlayer({ onTime }))
+    player.load('/audio.mp3')
+
+    element.__tick(0) // no metadata yet
+    expect(onTime).toHaveBeenLastCalledWith({ currentTime: 0, duration: null, progress: 0, rate: 1 })
+
+    element.__setMetadata(Infinity) // live / rangeless stream
+    element.__tick(5)
+    expect(onTime).toHaveBeenLastCalledWith({ currentTime: 5, duration: null, progress: 0, rate: 1 })
+  })
+
+  it('also fires when metadata arrive and when a seek settles', () => {
+    const onTime = vi.fn()
+    const [player] = withSetup(() => useAudioPlayer({ onTime }))
+    player.load('/audio.mp3')
+
+    element.__setMetadata(100)
+    expect(onTime).toHaveBeenLastCalledWith({ currentTime: 0, duration: 100, progress: 0, rate: 1 })
+
+    element.__endSeek(40)
+    expect(onTime).toHaveBeenLastCalledWith({ currentTime: 40, duration: 100, progress: 0.4, rate: 1 })
+  })
+})
+
+describe('useAudioPlayer — seekBy (2.2.0)', () => {
+  it('seeks relative to the current position, clamped into [0, duration]', () => {
+    const [player] = setupPlayer()
+    player.load('/audio.mp3')
+    element.__setMetadata(120)
+    element.__canPlay()
+
+    player.seek(60)
+    player.seekBy(15)
+    expect(element.currentTimeSets).toEqual([60, 75])
+
+    player.seekBy(-100)
+    expect(element.currentTimeSets).toEqual([60, 75, 0])
+
+    player.seekBy(500)
+    expect(element.currentTimeSets).toEqual([60, 75, 0, 120])
+  })
+
+  it('is a no-op while duration is unknown (metadata pending or live stream)', () => {
+    const [player] = setupPlayer()
+    player.load('/audio.mp3')
+
+    player.seekBy(15) // metadata pending
+    expect(element.currentTimeSets).toEqual([])
+
+    element.__setMetadata(Infinity) // live stream: no reference frame
+    player.seekBy(15)
+    expect(element.currentTimeSets).toEqual([])
+  })
+})
+
+describe('useAudioPlayer — preservesPitch (2.2.0)', () => {
+  it('applies the standard and legacy WebKit property, defaulting to true', () => {
+    const [player] = setupPlayer()
+    player.load('/audio.mp3')
+
+    expect(element.preservesPitch).toBe(true)
+    expect(element.webkitPreservesPitch).toBe(true)
+  })
+
+  it('keeps the setting across a src swap', () => {
+    const [player] = setupPlayer()
+    player.setPreservesPitch(false)
+    player.load('/a.mp3')
+
+    expect(element.preservesPitch).toBe(false)
+    expect(element.webkitPreservesPitch).toBe(false)
+
+    player.load('/b.mp3')
+    expect(element.preservesPitch).toBe(false)
+    expect(element.webkitPreservesPitch).toBe(false)
+  })
+})
+
+describe('useAudioPlayer — src echo on consumer hooks (2.2.0)', () => {
+  it('hands the current src to onReady/onEnded/onError for stale-event filtering', () => {
+    const onReady = vi.fn()
+    const onEnded = vi.fn()
+    const onError = vi.fn()
+    const [player] = withSetup(() => useAudioPlayer({ onReady, onEnded, onError }))
+
+    player.load('/a.mp3')
+    element.__canPlay()
+    expect(onReady).toHaveBeenCalledWith('/a.mp3')
+
+    element.play()
+    element.__ended()
+    expect(onEnded).toHaveBeenCalledWith('/a.mp3')
+
+    const mediaError = { code: 2, message: 'NETWORK_ERR' }
+    element.__error(mediaError)
+    expect(onError).toHaveBeenCalledWith(mediaError, '/a.mp3')
+
+    player.load('/b.mp3') // the echo follows the incoming src, not the old one
+    element.__canPlay()
+    expect(onReady).toHaveBeenCalledWith('/b.mp3')
   })
 })

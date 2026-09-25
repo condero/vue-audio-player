@@ -312,3 +312,343 @@ describe('AudioPlayer — queue-consumer hooks', () => {
     expect(element.src).toBe('/track-2.mp3')
   })
 })
+
+describe('AudioPlayer — time event (2.2.0)', () => {
+  it('emits time on timeupdate with currentTime, duration and progress', async () => {
+    const wrapper = mountPlayer()
+    element.__setMetadata(120) // metadata arrival already emits once
+    element.__canPlay()
+    await nextTick()
+
+    element.__tick(30)
+    await nextTick()
+    expect(wrapper.emitted('time').length).toBe(2)
+    expect(wrapper.emitted('time')[1][0]).toEqual({ currentTime: 30, duration: 120, progress: 0.25, rate: 1 })
+  })
+
+  it('reports duration null and progress 0 while duration is unknown', async () => {
+    const wrapper = mountPlayer()
+    element.__canPlay() // ready without metadata: duration still unknown
+    await nextTick()
+
+    element.__tick(0)
+    await nextTick()
+    expect(wrapper.emitted('time')[0][0]).toEqual({ currentTime: 0, duration: null, progress: 0, rate: 1 })
+  })
+
+  it('also emits when metadata arrive and when a seek settles', async () => {
+    const wrapper = mountPlayer()
+
+    element.__setMetadata(100)
+    await nextTick()
+    expect(wrapper.emitted('time').length).toBe(1)
+    expect(wrapper.emitted('time')[0][0]).toEqual({ currentTime: 0, duration: 100, progress: 0, rate: 1 })
+
+    element.__endSeek(40) // seeked + timeupdate both carry the new position
+    await nextTick()
+    expect(wrapper.emitted('time').length).toBe(3)
+    expect(wrapper.emitted('time')[2][0]).toEqual({ currentTime: 40, duration: 100, progress: 0.4, rate: 1 })
+  })
+
+  it('feeds MediaSession-style position state after a src swap', async () => {
+    const wrapper = mountPlayer()
+    element.__setMetadata(120)
+    element.__canPlay()
+    await nextTick()
+
+    await wrapper.setProps({ src: '/track-2.mp3' })
+    element.__setMetadata(200)
+    element.__canPlay()
+    await nextTick()
+
+    element.__tick(50)
+    await nextTick()
+    expect(wrapper.emitted('time').at(-1)[0]).toEqual({
+      currentTime: 50,
+      duration: 200,
+      progress: 0.25,
+      rate: 1,
+    })
+  })
+})
+
+describe('AudioPlayer — playWhenReady (2.2.0)', () => {
+  it('plays on ready for every load, src swaps included', async () => {
+    const wrapper = mountPlayer({ playWhenReady: true })
+    element.__canPlay()
+    await nextTick()
+    expect(element.play).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({ src: '/track-2.mp3' })
+    element.__canPlay()
+    await nextTick()
+    expect(element.play).toHaveBeenCalledTimes(2)
+
+    element.__canPlay() // stall recovery: no new ready, no replay
+    await nextTick()
+    expect(element.play).toHaveBeenCalledTimes(2)
+  })
+
+  it('is off by default and respects a false flip mid-load', async () => {
+    const wrapper = mountPlayer()
+    element.__canPlay()
+    await nextTick()
+    expect(element.play).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ src: '/track-2.mp3', playWhenReady: true })
+    await wrapper.setProps({ playWhenReady: false }) // flip before canplay
+    element.__canPlay()
+    await nextTick()
+    expect(element.play).not.toHaveBeenCalled()
+  })
+
+  it('a policy rejection is not fatal: the player stays paused and warns', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    element.play.mockImplementationOnce(() =>
+      Promise.reject(new DOMException('play() failed', 'NotAllowedError')),
+    )
+    const wrapper = mountPlayer({ playWhenReady: true })
+
+    element.__canPlay()
+    await nextTick()
+    expect(warn).toHaveBeenCalled()
+    expect(element.paused).toBe(true)
+    warn.mockRestore()
+  })
+})
+
+describe('AudioPlayer — control toggles and compact variant (2.2.0)', () => {
+  it('control-toggle props remove the corresponding controls, the rest stay', async () => {
+    const wrapper = mountPlayer({
+      controls: { times: false, repeat: false, abLoop: false, volume: false },
+    })
+
+    expect(wrapper.find('.row-top').exists()).toBe(false)
+    expect(wrapper.find('button[title="Repeat"]').exists()).toBe(false)
+    expect(wrapper.find('button[title="Set A"]').exists()).toBe(false)
+    expect(wrapper.find('button[title="Set B"]').exists()).toBe(false)
+    expect(wrapper.find('.volume-group').exists()).toBe(false)
+    expect(wrapper.find('.btn-play').exists()).toBe(true) // partial object: play stays
+    expect(wrapper.find('.speed-select').exists()).toBe(true)
+  })
+
+  it('play can be hidden too, and defaults keep everything visible', () => {
+    const wrapper = mountPlayer({ controls: { play: false } })
+    expect(wrapper.find('.btn-play').exists()).toBe(false)
+    expect(wrapper.find('.volume-group').exists()).toBe(true)
+
+    const full = mountPlayer()
+    expect(full.find('.btn-play').exists()).toBe(true)
+    expect(full.find('.row-top').exists()).toBe(true)
+    expect(full.find('button[title="Repeat"]').exists()).toBe(true)
+    expect(full.find('button[title="Set A"]').exists()).toBe(true)
+    expect(full.find('.volume-group').exists()).toBe(true)
+  })
+
+  it('compact variant applies its layout class without touching fallback rendering', async () => {
+    const wrapper = mountPlayer({ variant: 'compact' }) // peaks stay null -> fallback bar
+    element.__canPlay()
+    await nextTick()
+
+    expect(wrapper.find('.player').classes()).toContain('player--compact')
+    expect(wrapper.find('.fallback-progress').exists()).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled() // compact never implies a waveform fetch
+  })
+})
+
+describe('AudioPlayer — src echo in payloads (2.2.0)', () => {
+  it('ready and ended carry their src, so stale events are detectable after a swap', async () => {
+    const wrapper = mountPlayer()
+    element.__canPlay()
+    await nextTick()
+    expect(wrapper.emitted('ready')[0][0]).toEqual({ src: '/audio.mp3' })
+
+    await wrapper.find('.btn-play').trigger('click')
+    element.__ended()
+    await nextTick()
+    expect(wrapper.emitted('ended')[0][0]).toEqual({ src: '/audio.mp3' })
+
+    await wrapper.setProps({ src: '/track-2.mp3' })
+    element.__canPlay()
+    await nextTick()
+    expect(wrapper.emitted('ready')[1][0]).toEqual({ src: '/track-2.mp3' })
+  })
+
+  it('error keeps the MediaError first and appends the src', async () => {
+    const wrapper = mountPlayer()
+    const mediaError = { code: 4, message: 'MEDIA_ERR_SRC_NOT_SUPPORTED' }
+
+    element.__error(mediaError)
+    await nextTick()
+    expect(wrapper.emitted('error')[0][0]).toStrictEqual(mediaError)
+    expect(wrapper.emitted('error')[0][1]).toEqual({ src: '/audio.mp3' })
+  })
+})
+
+describe('AudioPlayer — exposed position/duration/seekTo (2.2.0)', () => {
+  it('seekTo seeks the element; position and duration are readable', async () => {
+    const wrapper = mountPlayer()
+    element.__setMetadata(120)
+    element.__canPlay()
+    await nextTick()
+
+    expect(wrapper.vm.duration).toBe(120)
+    expect(wrapper.vm.position).toBe(0)
+
+    wrapper.vm.seekTo(30)
+    expect(element.currentTimeSets).toEqual([30])
+    expect(wrapper.vm.position).toBe(30)
+    expect(element.load).toHaveBeenCalledTimes(1) // a seek never reloads
+  })
+
+  it('duration is null while unknown; seekTo before metadata queues the seek', () => {
+    const wrapper = mountPlayer()
+    expect(wrapper.vm.duration).toBeNull()
+    expect(wrapper.vm.position).toBe(0)
+
+    wrapper.vm.seekTo(70) // no metadata yet: queued, shown optimistically
+    expect(element.currentTimeSets).toEqual([])
+    expect(wrapper.vm.position).toBe(70)
+
+    element.__setMetadata(100)
+    expect(element.currentTimeSets).toEqual([70])
+    expect(wrapper.vm.duration).toBe(100)
+  })
+})
+
+describe('AudioPlayer — speeds prop (2.2.0)', () => {
+  it('renders the default ladder ascending', () => {
+    const wrapper = mountPlayer()
+
+    const options = wrapper.findAll('.speed-select option')
+    expect(options.length).toBe(9)
+    expect(options[0].text()).toBe('0.5x')
+    expect(options.at(-1).text()).toBe('1.2x')
+    expect(options.map((o) => o.text())).toEqual([
+      '0.5x', '0.6x', '0.7x', '0.8x', '0.9x', '1x', '1.05x', '1.1x', '1.2x',
+    ])
+  })
+
+  it('dedupes, filters and sorts a custom prop regardless of order', () => {
+    const wrapper = mountPlayer({
+      speeds: [2, 0.5, 1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 1.05],
+    })
+
+    expect(wrapper.findAll('.speed-select option').map((o) => o.text()))
+      .toEqual(['0.5x', '1x', '1.05x', '2x'])
+  })
+
+  it('falls back to the default ladder when nothing survives the filter', () => {
+    const wrapper = mountPlayer({ speeds: [0, -1, Number.NaN] })
+
+    expect(wrapper.findAll('.speed-select option').length).toBe(9)
+  })
+
+  it('keeps the active rate on prop change while it is still offered', async () => {
+    const wrapper = mountPlayer()
+    element.__canPlay()
+    await nextTick()
+
+    await wrapper.setProps({ speeds: [0.5, 1.0, 2.0] })
+    expect(wrapper.vm.playbackRate).toBe(1)
+    expect(element.playbackRate).toBe(1)
+  })
+
+  it('snaps the active rate to the nearest preset when it is removed', async () => {
+    const wrapper = mountPlayer()
+    element.__canPlay()
+    await nextTick()
+
+    await wrapper.setProps({ speeds: [0.5, 2.0] }) // 1.0 gone: |0.5-1| = |2-1|... snap
+    expect(wrapper.vm.playbackRate).toBe(0.5) // tie -> first (lower) preset wins
+    expect(element.playbackRate).toBe(0.5)
+
+    await wrapper.setProps({ speeds: [0.5, 1.0, 2.0] }) // 0.5 still offered
+    expect(wrapper.vm.playbackRate).toBe(0.5)
+  })
+})
+
+describe('AudioPlayer — playbackRate exposure (2.2.0)', () => {
+  it('exposed getter follows the speed select and the element', async () => {
+    const wrapper = mountPlayer()
+    element.__setMetadata(120)
+    element.__canPlay()
+    await nextTick()
+
+    expect(wrapper.vm.playbackRate).toBe(1)
+
+    await wrapper.find('.speed-select').setValue('0.5')
+    expect(wrapper.vm.playbackRate).toBe(0.5)
+    expect(element.playbackRate).toBe(0.5)
+
+    await wrapper.find('.speed-select').setValue('1.2')
+    expect(wrapper.vm.playbackRate).toBe(1.2)
+    expect(element.playbackRate).toBe(1.2)
+  })
+
+  it('rate travels in the time payload after a speed change', async () => {
+    const wrapper = mountPlayer()
+    element.__setMetadata(120)
+    element.__canPlay()
+    await nextTick()
+
+    await wrapper.find('.speed-select').setValue('0.5')
+    element.__tick(30)
+    await nextTick()
+
+    expect(wrapper.emitted('time').at(-1)[0]).toEqual({
+      currentTime: 30,
+      duration: 120,
+      progress: 0.25,
+      rate: 0.5,
+    })
+  })
+})
+
+describe('AudioPlayer — preservesPitch prop (2.2.0)', () => {
+  it('defaults to true on the element, standard and legacy WebKit property', () => {
+    mountPlayer()
+    expect(element.preservesPitch).toBe(true)
+    expect(element.webkitPreservesPitch).toBe(true)
+  })
+
+  it('applies false and survives a src swap and a reactive flip', async () => {
+    const wrapper = mountPlayer({ preservesPitch: false })
+    expect(element.preservesPitch).toBe(false)
+    expect(element.webkitPreservesPitch).toBe(false)
+
+    await wrapper.setProps({ src: '/other.mp3' })
+    expect(element.preservesPitch).toBe(false)
+    expect(element.webkitPreservesPitch).toBe(false)
+
+    await wrapper.setProps({ preservesPitch: true })
+    expect(element.preservesPitch).toBe(true)
+    expect(element.webkitPreservesPitch).toBe(true)
+  })
+})
+
+describe('AudioPlayer — exposed seekBy (2.2.0)', () => {
+  it('skips relative to the current position, clamped into [0, duration]', async () => {
+    const wrapper = mountPlayer()
+    element.__setMetadata(120)
+    element.__canPlay()
+    await nextTick()
+
+    wrapper.vm.seekBy(15)
+    expect(element.currentTimeSets).toEqual([15])
+    expect(wrapper.vm.position).toBe(15)
+
+    wrapper.vm.seekBy(-100)
+    expect(element.currentTimeSets).toEqual([15, 0])
+
+    wrapper.vm.seekBy(500)
+    expect(element.currentTimeSets).toEqual([15, 0, 120])
+  })
+
+  it('is a no-op while duration is unknown', () => {
+    const wrapper = mountPlayer()
+
+    wrapper.vm.seekBy(15)
+    expect(element.currentTimeSets).toEqual([])
+  })
+})

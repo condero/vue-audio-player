@@ -8,18 +8,66 @@ const props = defineProps({
   // Start playback as soon as the initial load finishes. Policy rejections
   // are swallowed — the play button stays available for a manual tap.
   autoplay: { type: Boolean, default: false },
+  // Play intent that survives src swaps: while true, every load starts
+  // playing on `ready` — the initial one and every swap. Meant to be
+  // enabled from a user gesture; a policy rejection is logged and the
+  // player stays paused (hosts needing the rejection itself keep
+  // sequencing play() from `ready`). Takes effect on the next (re)load.
+  playWhenReady: { type: Boolean, default: false },
   // Opt into the client-side waveform: downloads the whole file in the
   // background and decodes it. Never blocks playback.
   waveform: { type: Boolean, default: false },
   // Precomputed peaks (numbers 0..1) — rendered as-is, nothing is fetched.
   peaks: { type: Array, default: null },
+  // 'full' (default) or 'compact'. Compact shrinks waveform, buttons and
+  // padding for queue-host bars; colors and Bootstrap theming are untouched.
+  variant: {
+    type: String,
+    default: 'full',
+    validator: (v) => ['full', 'compact'].includes(v),
+  },
+  // Per-control switches, all true by default: { play, volume, abLoop,
+  // repeat, times }. A partial object only hides what it names false.
+  controls: { type: Object, default: null },
+  // Playback-rate presets for the speed select, treated as a set: rendered
+  // deduped, filtered to finite values > 0 and sorted ascending — the prop
+  // is a set, the component owns the order. Defaults to the standard ladder;
+  // if the active rate is no longer offered after a change, it snaps to the
+  // nearest preset.
+  speeds: { type: Array, default: null },
+  // Keep pitch constant while the rate differs from 1 (default): the element
+  // stretches time — choir practice at 0.6x stays in tune. false = the
+  // cassette-style speed pitch shift.
+  preservesPitch: { type: Boolean, default: true },
 })
 
 // Queue-consumer surface: a host swaps `src` per track and reacts to
 // end-of-track and load failures instead of reaching into the native element.
-const emit = defineEmits(['ended', 'error', 'playing', 'paused', 'ready'])
+// `time` reports { currentTime, duration, progress } for MediaSession etc.
+const emit = defineEmits(['ended', 'error', 'playing', 'paused', 'ready', 'time'])
 
-const speeds = [1.2, 1.1, 1.05, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
+// `controls` is merged over these defaults so `{ abLoop: false }` keeps
+// every other control visible.
+const visibleControls = computed(() => ({
+  play: true,
+  volume: true,
+  abLoop: true,
+  repeat: true,
+  times: true,
+  ...props.controls,
+}))
+
+// Presets for the speed select, normalized from the `speeds` prop.
+const speedPresets = computed(() => {
+  const values = [...new Set(props.speeds ?? DEFAULT_SPEEDS)]
+    .filter((s) => Number.isFinite(s) && s > 0)
+    .sort((a, b) => a - b)
+  return values.length ? values : DEFAULT_SPEEDS
+})
+
+// Playback-rate presets offered when no `speeds` prop is given. The prop is
+// treated as a set: rendered deduped, filtered to finite values > 0, ascending.
+const DEFAULT_SPEEDS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.05, 1.1, 1.2]
 
 const {
   isLoading,
@@ -38,9 +86,12 @@ const {
   play,
   pause,
   togglePlay,
+  seek,
+  seekBy,
   seekByRatio,
   setPlaybackRate,
   setVolume,
+  setPreservesPitch,
   toggleRepeat,
   setLoopA,
   setLoopB,
@@ -48,16 +99,36 @@ const {
   setPeaks,
   generateWaveform,
 } = useAudioPlayer({
-  onEnded: () => emit('ended'),
-  onError: (mediaError) => emit('error', mediaError),
+  onEnded: (src) => emit('ended', { src }),
+  onError: (mediaError, src) => emit('error', mediaError, { src }),
   onPlaying: () => emit('playing'),
   onPaused: () => emit('paused'),
-  onReady: () => emit('ready'),
+  onReady: (src) => {
+    emit('ready', { src })
+    tryPlayWhenReady()
+  },
+  onTime: (t) => emit('time', t),
 })
 
 // Programmatic control for hosts: play() returns the element's own promise, so
 // an autoplay-policy rejection (NotAllowedError) reaches the caller.
-defineExpose({ play, pause })
+// `duration` mirrors the `time` payload: null while unknown, not 0/NaN.
+defineExpose({
+  play,
+  pause,
+  seekTo: seek,
+  seekBy,
+  get position() {
+    return currentTime.value
+  },
+  get duration() {
+    const d = duration.value
+    return Number.isFinite(d) && d > 0 ? d : null
+  },
+  get playbackRate() {
+    return playbackRate.value
+  },
+})
 
 const waveformCanvas = ref(null)
 const progressRef = ref(null)
@@ -79,15 +150,48 @@ load(props.src, { waveform: props.waveform })
 
 let autoplayDone = false
 function tryAutoplay() {
-  if (!props.autoplay || autoplayDone || isLoading.value) return
+  // playWhenReady covers every load (initial ones included), so when it is
+  // set there is nothing left for autoplay to do.
+  if (!props.autoplay || props.playWhenReady || autoplayDone || isLoading.value) return
   autoplayDone = true
   play()
+}
+
+// Fires on `ready`, once per load, swaps included: the intent lives in the
+// prop, so it survives src changes without extra bookkeeping. Checked at
+// ready-time, a false flip mid-load is respected. The rejection is logged —
+// hosts needing the NotAllowedError itself sequence play() from `ready`.
+function tryPlayWhenReady() {
+  if (!props.playWhenReady || isLoading.value) return
+  play().catch((err) => {
+    console.warn(
+      '[vue-audio-player] playWhenReady: play() was rejected — the player stays paused. ' +
+        'Enable it from a user gesture, or sequence play() from @ready to handle the rejection yourself.',
+      err,
+    )
+  })
 }
 
 watch(isLoading, (loading) => {
   if (!loading) tryAutoplay()
 })
 tryAutoplay()
+
+// Keep the active rate playable when the `speeds` prop changes: keep it while
+// it is still offered, otherwise snap to the nearest preset (the element
+// follows via the composable's playbackRate watcher).
+watch(speedPresets, (presets) => {
+  if (presets.includes(playbackRate.value)) return
+  const current = playbackRate.value
+  const nearest = presets.reduce((best, s) =>
+    Math.abs(s - current) < Math.abs(best - current) ? s : best,
+  )
+  setPlaybackRate(nearest)
+}, { immediate: true })
+
+// The prop drives the element (standard property plus the legacy WebKit
+// alias); the composable re-asserts it after every load().
+watch(() => props.preservesPitch, (v) => setPreservesPitch(v), { immediate: true })
 
 watch(
   () => props.src,
@@ -206,8 +310,8 @@ onMounted(drawWaveform)
 </script>
 
 <template>
-  <div class="player">
-    <div class="row-top">
+  <div class="player" :class="{ 'player--compact': variant === 'compact' }">
+    <div v-if="visibleControls.times" class="row-top">
       <span class="time">{{ formattedTime }}</span>
       <span class="time">{{ formattedDuration }}</span>
     </div>
@@ -237,7 +341,7 @@ onMounted(drawWaveform)
     </div>
 
     <div class="row-controls">
-      <button class="btn-icon" :class="{ active: isRepeat }" :disabled="isLoading" @click="toggleRepeat" title="Repeat">
+      <button v-if="visibleControls.repeat" class="btn-icon" :class="{ active: isRepeat }" :disabled="isLoading" @click="toggleRepeat" title="Repeat">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="17 1 21 5 17 9" />
           <path d="M3 11V9a4 4 0 0 1 4-4h14" />
@@ -247,6 +351,7 @@ onMounted(drawWaveform)
       </button>
 
       <button
+        v-if="visibleControls.abLoop"
         class="btn-icon"
         :class="{ active: loopA !== null }"
         :disabled="isLoading"
@@ -255,6 +360,7 @@ onMounted(drawWaveform)
       >A</button>
 
       <button
+        v-if="visibleControls.abLoop"
         class="btn-icon"
         :class="{ active: loopB !== null }"
         :disabled="isLoading"
@@ -262,14 +368,14 @@ onMounted(drawWaveform)
         :title="loopB !== null ? 'B: ' + formatTime(loopB) : 'Set B'"
       >B</button>
 
-      <button v-if="hasABLoop" class="btn-icon" :disabled="isLoading" @click="clearLoop" title="Clear loop">
+      <button v-if="visibleControls.abLoop && hasABLoop" class="btn-icon" :disabled="isLoading" @click="clearLoop" title="Clear loop">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
 
-      <button class="btn-play" :disabled="isLoading" @click="togglePlay">
+      <button v-if="visibleControls.play" class="btn-play" :disabled="isLoading" @click="togglePlay">
         <svg v-if="!isPlaying" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
           <path d="M8 5v14l11-7z" />
         </svg>
@@ -279,10 +385,10 @@ onMounted(drawWaveform)
       </button>
 
       <select class="speed-select" :disabled="isLoading" :value="playbackRate" @change="setPlaybackRate(parseFloat($event.target.value))">
-        <option v-for="s in speeds" :key="s" :value="s">{{ s }}x</option>
+        <option v-for="s in speedPresets" :key="s" :value="s">{{ s }}x</option>
       </select>
 
-      <div class="volume-group">
+      <div v-if="visibleControls.volume" class="volume-group">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
           <path d="M15.54 8.46a5 5 0 0 1 0 7.07" v-if="volume > 0" />
@@ -585,5 +691,53 @@ onMounted(drawWaveform)
 }
 .player:hover .version {
   opacity: 1;
+}
+
+/* Compact variant (variant="compact"): same theming, tighter geometry for
+   queue-host bars (~76px with `times` hidden). Only sizes change. */
+.player--compact {
+  padding: 6px 10px;
+  gap: 4px;
+}
+
+.player--compact .waveform-bar {
+  height: 28px;
+}
+
+.player--compact .row-top {
+  font-size: 11px;
+}
+
+.player--compact .btn-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.player--compact .btn-play {
+  width: 32px;
+  height: 32px;
+}
+
+.player--compact .btn-play svg {
+  width: 20px;
+  height: 20px;
+}
+
+.player--compact .speed-select {
+  height: 26px;
+  padding: 2px 6px;
+}
+
+.player--compact .volume-group {
+  gap: 3px;
+}
+
+.player--compact .volume-slider {
+  width: 54px;
+}
+
+.player--compact .loading-overlay .spinner {
+  width: 18px;
+  height: 18px;
 }
 </style>
